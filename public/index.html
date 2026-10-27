@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exhibit M-4: The Loan Model</title>
+<style>
+:root{--paper:#eef1ee;--ink:#1d2b33;--muted:#5d6b73;--line:#c9d1cd;--ok:#1b8a8c;--no:#8b3a8f;--panel:#f8faf8;--accent:#1d2b33}
+@media (prefers-color-scheme:dark){:root{--paper:#161d21;--ink:#e6ece8;--muted:#9aa8a1;--line:#2e3a3f;--ok:#4fc4c4;--no:#c987cc;--panel:#1d262b;--accent:#e6ece8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 "Iowan Old Style",Georgia,serif}
+header{padding:20px 28px 8px;max-width:1180px;margin:auto}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted);max-width:70ch}
+main{max-width:1180px;margin:auto;padding:12px 28px 40px;display:grid;grid-template-columns:minmax(0,640px) minmax(0,1fr);gap:24px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.mono,input,button,select,td,th{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:13px}
+canvas{width:100%;aspect-ratio:1;background:var(--panel);border:1px solid var(--line);cursor:crosshair;display:block;touch-action:none}
+.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);margin-top:8px;font-size:13px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+section{background:var(--panel);border:1px solid var(--line);padding:14px 16px;margin-bottom:14px}
+h2{font-size:15px;margin:0 0 8px}
+label{display:inline-flex;align-items:center;gap:6px;margin-right:10px}
+input,select{background:var(--paper);color:var(--ink);border:1px solid var(--line);padding:5px 7px;width:88px}
+select{width:auto}
+button{background:var(--accent);color:var(--paper);border:0;padding:6px 12px;cursor:pointer}
+button.ghost{background:none;color:var(--ink);border:1px solid var(--line)}
+button:focus-visible,input:focus-visible,select:focus-visible,canvas:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
+.read{display:flex;align-items:baseline;gap:12px;margin-top:10px;min-height:28px}
+.read b{font-size:20px}
+.bar{height:6px;background:var(--line);margin-top:6px}.bar i{display:block;height:100%;background:var(--accent);width:0}
+.log{max-height:170px;overflow:auto;margin-top:8px}
+table{border-collapse:collapse;width:100%}td,th{padding:2px 6px;text-align:left;border-bottom:1px solid var(--line)}
+pre{margin:6px 0 0;padding:8px;background:var(--paper);overflow:auto;font-size:12px}
+.msg{margin-top:8px}.good{color:var(--ok)}.bad{color:var(--no)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Exhibit M-4: the loan model</h1>
+  <p>This classifier approves or rejects applications from two normalised features. Its model card says it is accurate. Something in its behaviour says otherwise. Probe it, build your own evidence, then name what it is hiding.</p>
+</header>
+<main>
+  <div>
+    <canvas id="plot" width="640" height="640" tabindex="0" aria-label="Decision plot. Click to probe a point; drag to select an area to scan."></canvas>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--ok)"></i>APPROVE</span>
+      <span><i class="sw" style="background:var(--no)"></i>REJECT</span>
+      <span>Small dots: reference applications. Filled squares and circles: your probes, stronger colour means higher confidence.</span>
+    </div>
+  </div>
+  <div>
+    <section>
+      <h2>Probe</h2>
+      <label>x1 <input id="x1" type="number" step="0.01" value="0"></label>
+      <label>x2 <input id="x2" type="number" step="0.01" value="0"></label>
+      <button id="probe">Probe point</button>
+      <div class="read mono"><b id="rlabel">-</b><span id="rconf"></span></div>
+      <div class="bar"><i id="rbar"></i></div>
+    </section>
+    <section>
+      <h2>Scan an area</h2>
+      <p style="margin:0 0 8px;color:var(--muted)">Drag a box on the plot, then choose a grid size. A scan costs one query per cell.</p>
+      <label>Grid <select id="res"><option>8</option><option selected>12</option><option>16</option><option>20</option></select> x grid</label>
+      <button id="scan" class="ghost" disabled>Scan selection</button>
+      <button id="clear" class="ghost">Clear map</button>
+      <div class="mono" style="margin-top:8px">Queries left: <b id="left">-</b> / <span id="budget">-</span></div>
+    </section>
+    <section>
+      <h2>Your evidence</h2>
+      <div class="mono" id="card" style="color:var(--muted)"></div>
+      <div class="log"><table><thead><tr><th>#</th><th>x1</th><th>x2</th><th>class</th><th>conf</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <p style="margin:8px 0 0"><button id="csv" class="ghost">Download probes as CSV</button></p>
+      <p style="margin:8px 0 0;color:var(--muted)">Prefer scripts? Send the header below to <span class="mono">/api/batch</span>, <span class="mono">/api/samples</span> and <span class="mono">/api/session</span>.</p>
+      <pre id="curl"></pre>
+    </section>
+    <section>
+      <h2>Verify the trigger</h2>
+      <label>x1 <input id="s1" type="number" step="0.01"></label>
+      <label>x2 <input id="s2" type="number" step="0.01"></label>
+      <button id="submit">Verify trigger</button>
+      <div class="msg mono" id="smsg"></div>
+    </section>
+  </div>
+</main>
+<script>
+const SIZE = 640; let LIM = 6, LABELS = ["APPROVE", "REJECT"], MAXB = 400;
+const cv = document.getElementById("plot"), ctx = cv.getContext("2d");
+const $ = id => document.getElementById(id);
+let samples = {points: [], labels: []}, marks = [], probes = [], sel = null, drag = null;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const px = v => (v + LIM) / (2 * LIM) * SIZE, py = v => SIZE - (v + LIM) / (2 * LIM) * SIZE;
+const unx = p => p / SIZE * 2 * LIM - LIM, uny = p => (SIZE - p) / SIZE * 2 * LIM - LIM;
+
+async function api(path, body) {
+  const r = await fetch(path, {method: body ? "POST" : "GET", headers: {"Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined});
+  const j = await r.json().catch(() => ({error: "bad response"}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const col = (l, a) => { ctx.globalAlpha = a; return css(l === "APPROVE" ? "--ok" : "--no"); };
+
+function draw() {
+  ctx.clearRect(0, 0, SIZE, SIZE); ctx.globalAlpha = 1;
+  ctx.strokeStyle = css("--line"); ctx.fillStyle = css("--muted"); ctx.font = "11px ui-monospace,monospace"; ctx.lineWidth = 1;
+  for (let v = -LIM; v <= LIM; v += 2) {
+    ctx.beginPath(); ctx.moveTo(px(v), 0); ctx.lineTo(px(v), SIZE); ctx.moveTo(0, py(v)); ctx.lineTo(SIZE, py(v)); ctx.stroke();
+    ctx.fillText(v, px(v) + 3, SIZE - 4); ctx.fillText(v, 3, py(v) - 3);
+  }
+  for (const m of marks) {
+    ctx.fillStyle = col(m.label, .25 + .75 * Math.max(0, (m.conf - .5) * 2));
+    if (m.size) ctx.fillRect(px(m.x - m.size / 2), py(m.y + m.size / 2), m.size / (2 * LIM) * SIZE + 1, m.size / (2 * LIM) * SIZE + 1);
+    else { ctx.beginPath(); ctx.arc(px(m.x), py(m.y), 6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = css("--ink"); ctx.stroke(); }
+  }
+  ctx.globalAlpha = .9;
+  samples.points.forEach((p, i) => { ctx.fillStyle = css(samples.labels[i] ? "--no" : "--ok"); ctx.beginPath(); ctx.arc(px(p[0]), py(p[1]), 2.2, 0, 7); ctx.fill(); });
+  ctx.globalAlpha = 1;
+  if (sel) { ctx.setLineDash([5, 4]); ctx.strokeStyle = css("--ink"); ctx.strokeRect(px(sel.x0), py(sel.y1), px(sel.x1) - px(sel.x0), py(sel.y0) - py(sel.y1)); ctx.setLineDash([]); }
+}
+
+function record(x, y, r, size) {
+  marks.push({x, y, size, label: r.label, conf: r.confidence});
+  probes.push([x, y, r.label, r.confidence]);
+}
+function refreshLog() {
+  $("rows").innerHTML = probes.slice(-40).reverse().map((p, i) => `<tr><td>${probes.length - i}</td><td>${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td><td>${p[3]}</td></tr>`).join("");
+}
+function setLeft(n) { $("left").textContent = n; }
+
+async function probe(x, y) {
+  x = +(+x).toFixed(3); y = +(+y).toFixed(3);
+  try {
+    const j = await api("/api/predict", {x1: x, x2: y});
+    const r = j.result; record(x, y, r); setLeft(j.remaining);
+    $("x1").value = x; $("x2").value = y; $("s1").value = x; $("s2").value = y;
+    $("rlabel").textContent = r.label; $("rlabel").style.color = css(r.label === "APPROVE" ? "--ok" : "--no");
+    $("rconf").textContent = "confidence " + r.confidence.toFixed(4); $("rbar").style.width = (r.confidence * 100) + "%";
+    refreshLog(); draw();
+  } catch (e) { $("rconf").textContent = e.message; }
+}
+
+function pos(ev) {
+  const b = cv.getBoundingClientRect(), t = ev.touches ? ev.touches[0] : ev;
+  return [unx((t.clientX - b.left) / b.width * SIZE), uny((t.clientY - b.top) / b.height * SIZE)];
+}
+cv.addEventListener("pointerdown", e => { drag = pos(e); sel = null; $("scan").disabled = true; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointermove", e => {
+  if (!drag) return; const p = pos(e);
+  sel = {x0: Math.min(drag[0], p[0]), x1: Math.max(drag[0], p[0]), y0: Math.min(drag[1], p[1]), y1: Math.max(drag[1], p[1])}; draw();
+});
+cv.addEventListener("pointerup", e => {
+  const p = pos(e), moved = drag && Math.hypot(p[0] - drag[0], p[1] - drag[1]) > .3;
+  if (!moved) { sel = null; probe(p[0], p[1]); } else $("scan").disabled = false;
+  drag = null; draw();
+});
+
+$("probe").onclick = () => probe($("x1").value, $("x2").value);
+$("clear").onclick = () => { marks = []; sel = null; $("scan").disabled = true; draw(); };
+$("scan").onclick = async () => {
+  if (!sel) return; const n = +$("res").value, st = [(sel.x1 - sel.x0) / n, (sel.y1 - sel.y0) / n];
+  const pts = []; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) pts.push([+(sel.x0 + st[0] * (i + .5)).toFixed(3), +(sel.y0 + st[1] * (j + .5)).toFixed(3)]);
+  try {
+    for (let k = 0; k < pts.length; k += MAXB) {
+      const part = pts.slice(k, k + MAXB), j = await api("/api/batch", {points: part});
+      j.result.forEach((r, i) => record(part[i][0], part[i][1], r, Math.max(st[0], st[1]))); setLeft(j.remaining);
+    }
+    refreshLog(); draw();
+  } catch (e) { alert(e.message); }
+};
+$("csv").onclick = () => {
+  const blob = new Blob(["x1,x2,label,confidence\n" + probes.map(p => p.join(",")).join("\n")], {type: "text/csv"});
+  const a = Object.assign(document.createElement("a"), {href: URL.createObjectURL(blob), download: "probes.csv"}); a.click();
+};
+$("submit").onclick = async () => {
+  try {
+    const j = await api("/api/submit", {x1: +$("s1").value, x2: +$("s2").value});
+    $("smsg").className = "msg mono " + (j.correct ? "good" : "bad"); $("smsg").textContent = j.correct ? "Trigger confirmed. Submit this flag on the CTF site: " + j.flag : j.message;
+  } catch (e) { $("smsg").className = "msg mono bad"; $("smsg").textContent = e.message; }
+};
+
+(async () => {
+  const s = await api("/api/session"); LIM = s.limit; LABELS = s.labels; MAXB = s.max_batch;
+  setLeft(s.remaining); $("budget").textContent = s.budget;
+  $("card").textContent = "Model card: held-out accuracy " + (s.model_card.heldout_accuracy * 100).toFixed(1) + "%";
+  $("curl").textContent = `X-Token: ${s.token}\n\ncurl -s -X POST $HOST/api/batch \\\n  -H 'X-Token: ${s.token}' -H 'Content-Type: application/json' \\\n  -d '{"points": [[0,0],[1,2]]}'`;
+  samples = await api("/api/samples"); draw();
+})();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+</script>
+</body>
+</html>
